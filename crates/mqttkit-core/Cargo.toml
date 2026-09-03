@@ -1,0 +1,18 @@
+[package]
+name = "mqttkit-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mqttkit-ipc.workspace = true
+mqttkit-config.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+rumqttc.workspace = true
+rhai.workspace = true
+base64 = "0.22"

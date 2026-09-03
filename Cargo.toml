@@ -1,0 +1,61 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mqttkit-ipc",
+    "crates/mqttkit-config",
+    "crates/mqttkit-core",
+    "apps/desktop/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "Apache-2.0"
+authors = ["MqttRustUI"]
+
+[workspace.dependencies]
+# 内部 crate
+mqttkit-ipc = { path = "crates/mqttkit-ipc" }
+mqttkit-config = { path = "crates/mqttkit-config" }
+mqttkit-core = { path = "crates/mqttkit-core" }
+
+# 通用
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+once_cell = "1"
+
+# MQTT
+rumqttc = { version = "0.25", default-features = false, features = [
+    "use-rustls",
+    "websocket",
+    "proxy",
+] }
+
+# 凭据
+keyring = "3"
+
+# 脚本引擎
+rhai = "1"
+
+# 日志
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# 桌面壳（仅 apps/desktop 使用）
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+
+[profile.release]
+opt-level = "z"      # 体积优先
+lto = true
+strip = true
+codegen-units = 1
+panic = "abort"
