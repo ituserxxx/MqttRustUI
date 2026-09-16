@@ -6,10 +6,16 @@
 ## 0. 前置依赖
 
 ```bash
-# Rust 工具链
+# Rust 工具链（**注意：需要 stable ≥ 1.85**，低于 1.77.2 会装不上 tauri-cli）
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 rustup default stable
+rustup update stable          # 如果已装过 rustup 但版本太旧（1.75），必须先 update
+rustc --version               # 确认 ≥ 1.85
+
+# 国内网络慢可换镜像：
+#   export RUSTUP_DIST_SERVER="https://rsproxy.cn"
+#   export RUSTUP_UPDATE_ROOT="https://rsproxy.cn/rustup"
 
 # 系统库（Tauri 2 + WebKitGTK 必需）
 sudo apt update
@@ -21,8 +27,8 @@ sudo apt install -y libwebkit2gtk-4.1-dev build-essential \
 sudo apt install -y nodejs npm
 # 或用 nvm： nvm install 20 && nvm use 20
 
-# Tauri CLI
-cargo install tauri-cli --version "^2"
+# Tauri CLI（--locked 锁死依赖树，避免传递依赖要求更新 rustc）
+cargo install tauri-cli --locked --version "^2"
 ```
 
 ## 1. 准备应用图标（Tauri 打包必需）
@@ -83,11 +89,35 @@ docker run -it --rm -p 1883:1883 eclipse-mosquitto:2
 
 ## 已知需核对的点（按你装的 rumqttc 版本微调 `crates/mqttkit-core/src/protocol.rs`）
 
-1. **TLS 构造器**：本代码用的是 `Transport::tls_with_config(TlsConfiguration { ca, client_auth, alpn })`（rumqttc 0.25 形态）。
-   若你的版本是 `tls_with_selfsigned_certs(...)` 或其他签名，改 `build_transport` 即可，core 其余不动。
-2. **代理**：`opts.set_proxy(Proxy::http(&url))`。个别版本是 `Proxy::http(String)`，按编译器提示调整。
-3. **协议版本**：`opts.set_protocol(Protocol::MQTT3_1_1 / MQTT5)`。若版本无 `set_protocol`，改用对应构造参数。
-4. **`AsyncClient::disconnect()`**：用于主动断开，个别旧版为 `client.disconnect()` 返回 `Request`，按提示改 `await` 即可。
-5. **Tauri 权限**：`capabilities/default.json` 只开了最小权限；若用到 `global-shortcut` 等，记得补对应 permission。
+1. **TLS 构造器**：标准校验路径用 `Transport::tls_with_config(TlsConfiguration { ca, client_auth, alpn })`（rumqttc 0.25 形态）。
+   若你的版本是 `tls_with_selfsigned_certs(...)` 或其他签名，改 `build_tls_transport` 即可，core 其余不动。
+2. **TLS 自签放行（verify_hostname=false）**：用 rustls 0.23 danger-mode 链式调用
+   `ClientConfig::builder().with_root_certificates(..).dangerous().with_custom_certificate_verifier(..)`，
+   然后交给 rumqttc 的 `Transport::Tls(TlsConfiguration::CustomConfig(Arc<ClientConfig>))`。
+   若 rustls/rumqttc 版本签名不同，只改 `build_tls_transport` 里这两处。
+3. **代理**：`opts.set_proxy(Proxy::http(&url))`。个别版本是 `Proxy::http(String)`，按编译器提示调整。
+4. **协议版本**：`opts.set_protocol(Protocol::MQTT3_1_1 / MQTT5)`。若版本无 `set_protocol`，改用对应构造参数。
+5. **`AsyncClient::disconnect()`**：用于主动断开，个别旧版为 `client.disconnect()` 返回 `Request`，按提示改 `await` 即可。
+6. **Tauri 权限**：`capabilities/default.json` 只开了最小权限 + fs/dialog；若用到 `global-shortcut` 等，记得补对应 permission。
+
+## 7. 调试技巧
+
+```bash
+# 提日志级别（默认 info）
+RUST_LOG=debug cargo tauri dev
+
+# 只看某个模块
+RUST_LOG="mqttkit_core=debug,mqttrustui=trace" cargo tauri dev
+
+# 前端单独热更新（不用重编 Rust）
+cd ui && npm run dev        # vite 起 http://localhost:5173
+```
+
+**日志与配置位置（WSL）**：
+- 日志（脱敏后）：`~/.local/share/com.mqttrustui/logs/mqttrustui.log`
+- 配置：`~/.config/com.mqttrustui/config.json`（只含 credential_ref，无凭据明文）
+- 损坏配置备份：同目录 `config.json.bak`
+
+**headless WSL 注意**：WSL 默认无显示，`tauri dev` 的 GUI 窗口需要 WSLg（Windows 11 自带）或 X Server（VcXsrv）。纯逻辑排错用 `cargo check` + 日志即可，不必起 GUI。
 
 > 日志脱敏、配置原子写、keyring 容错等都已实现，`cargo check` 通过即可进入功能联调。

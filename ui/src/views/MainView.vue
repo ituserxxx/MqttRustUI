@@ -18,6 +18,7 @@
           allow-clear
         />
         <a-button @click="onClear" :disabled="!activeId">清屏</a-button>
+        <a-button @click="settingsOpen = true">设置</a-button>
       </a-layout-header>
 
       <a-alert
@@ -29,7 +30,7 @@
 
       <a-layout-content class="content">
         <div class="panes">
-          <TopicTree :connection-id="activeId" class="pane-topic" />
+          <TopicTree :connection-id="activeId" class="pane-topic" @select-topic="onSelectTopic" />
           <MessageList
             :messages="filteredMessages"
             :connection-id="activeId"
@@ -42,16 +43,22 @@
         <PublishPanel :connection-id="activeId" />
       </a-layout-footer>
     </a-layout>
+
+    <SettingsModal v-model:open="settingsOpen" />
   </a-layout>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { message } from 'ant-design-vue'
+import { listen } from '@tauri-apps/api/event'
+import { save, open as openDialog } from '@tauri-apps/plugin-dialog'
 import ConnectionList from '../components/ConnectionList.vue'
 import TopicTree from '../components/TopicTree.vue'
 import MessageList from '../components/MessageList.vue'
 import PublishPanel from '../components/PublishPanel.vue'
-import { listenEvents } from '../api/backend'
+import SettingsModal from '../components/SettingsModal.vue'
+import { listenEvents, api } from '../api/backend'
 import { useConnectionsStore } from '../stores/connections'
 import { useMessagesStore } from '../stores/messages'
 import { useSettingsStore } from '../stores/settings'
@@ -63,38 +70,37 @@ const settingsStore = useSettingsStore()
 
 const activeId = ref<string>('')
 const search = ref('')
+const topicFilter = ref('')
 const degradedBanner = ref(false)
+const settingsOpen = ref(false)
 
 let unlisten: (() => void) | null = null
+let unlistenMenu: (() => void) | null = null
 
 const stateColor = computed(() => {
-  const s = activeId.value ? connStore.states[activeId.value] : undefined
-  return (
-    {
-      idle: 'default',
-      connecting: 'gold',
-      connected: 'green',
-      reconnecting: 'orange',
-      failed: 'red',
-      disconnecting: 'default',
-    }[s ?? 'idle'] ?? 'default'
-  )
+  const s = (activeId.value ? connStore.states[activeId.value] : undefined) ?? 'idle'
+  const map: Record<ConnectionState, string> = {
+    idle: 'default',
+    connecting: 'gold',
+    connected: 'green',
+    reconnecting: 'orange',
+    failed: 'red',
+    disconnecting: 'default',
+  }
+  return map[s]
 })
 
 const stateText = computed(() => {
-  const s = (activeId.value ? connStore.states[activeId.value] : undefined) as
-    | ConnectionState
-    | undefined
-  return (
-    {
-      idle: '未连接',
-      connecting: '连接中',
-      connected: '已连接',
-      reconnecting: '重连中',
-      failed: '失败',
-      disconnecting: '断开中',
-    }[s ?? 'idle'] ?? '未连接'
-  )
+  const s = (activeId.value ? connStore.states[activeId.value] : undefined) ?? 'idle'
+  const map: Record<ConnectionState, string> = {
+    idle: '未连接',
+    connecting: '连接中',
+    connected: '已连接',
+    reconnecting: '重连中',
+    failed: '失败',
+    disconnecting: '断开中',
+  }
+  return map[s]
 })
 
 const activeStats = computed(() =>
@@ -103,9 +109,14 @@ const activeStats = computed(() =>
 
 const filteredMessages = computed<StoredMessage[]>(() => {
   const list = activeId.value ? msgStore.byConn[activeId.value] ?? [] : []
+  let out = list
+  // Topic 树选中的精确过滤（点击树节点后只看该 topic）
+  if (topicFilter.value) {
+    out = out.filter((m) => m.topic.startsWith(topicFilter.value))
+  }
   const q = search.value.trim().toLowerCase()
-  if (!q) return list
-  return list.filter(
+  if (!q) return out
+  return out.filter(
     (m) =>
       m.topic.toLowerCase().includes(q) ||
       (m.preview ?? '').toLowerCase().includes(q),
@@ -114,6 +125,38 @@ const filteredMessages = computed<StoredMessage[]>(() => {
 
 function onClear() {
   if (activeId.value) msgStore.clear(activeId.value)
+}
+
+function onSelectTopic(topic: string) {
+  // 再点一次同一节点取消过滤
+  topicFilter.value = topicFilter.value === topic ? '' : topic
+}
+
+// 菜单事件：导入/导出配置、打开设置
+async function onExport() {
+  try {
+    const json = await api.exportConfig()
+    const path = await save({ defaultPath: 'mqttkit-config.json', filters: [{ name: 'JSON', extensions: ['json'] }] })
+    if (!path) return
+    const { writeTextFile } = await import('@tauri-apps/plugin-fs')
+    await writeTextFile(path, json)
+    message.success('配置已导出到 ' + path)
+  } catch (e) {
+    message.error('导出失败：' + String(e))
+  }
+}
+async function onImport() {
+  try {
+    const path = await openDialog({ filters: [{ name: 'JSON', extensions: ['json'] }] })
+    if (!path || Array.isArray(path)) return
+    const { readTextFile } = await import('@tauri-apps/plugin-fs')
+    const json = await readTextFile(path)
+    await api.importConfig(json)
+    await connStore.load()
+    message.success('配置已导入')
+  } catch (e) {
+    message.error('导入失败：' + String(e))
+  }
 }
 
 // 切换连接时回填最近消息
@@ -141,9 +184,18 @@ onMounted(async () => {
       if (p.connection_id === activeId.value) degradedBanner.value = p.degraded
     },
   })
+
+  // 菜单事件
+  const u1 = await listen('menu:settings', () => { settingsOpen.value = true })
+  const u2 = await listen('menu:import_cfg', onImport)
+  const u3 = await listen('menu:export_cfg', onExport)
+  unlistenMenu = () => { u1(); u2(); u3() }
 })
 
-onBeforeUnmount(() => unlisten?.())
+onBeforeUnmount(() => {
+  unlisten?.()
+  unlistenMenu?.()
+})
 </script>
 
 <style scoped>

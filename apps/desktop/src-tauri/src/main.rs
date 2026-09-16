@@ -23,6 +23,7 @@ fn main() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -101,7 +102,10 @@ fn main() {
             commands::save_connection,
             commands::delete_connection,
             commands::get_settings,
-            commands::save_settings
+            commands::save_settings,
+            commands::export_config,
+            commands::import_config,
+            commands::disconnect_all
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

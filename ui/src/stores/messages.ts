@@ -9,7 +9,7 @@ export const useMessagesStore = defineStore('messages', {
   state: () => ({
     byConn: {} as Record<string, StoredMessage[]>,
     degraded: {} as Record<string, boolean>,
-    stats: {} as Record<string, { received: number; sent: number; recv_rate: number }>,
+    stats: {} as Record<string, { received: number; sent: number; recv_rate: number; send_rate: number }>,
     total: {} as Record<string, number>,
   }),
   actions: {
@@ -26,7 +26,7 @@ export const useMessagesStore = defineStore('messages', {
     setDegraded(connectionId: string, v: boolean) {
       this.degraded[connectionId] = v
     },
-    setStats(connectionId: string, s: { received: number; sent: number; recv_rate: number }) {
+    setStats(connectionId: string, s: { received: number; sent: number; recv_rate: number; send_rate: number }) {
       this.stats[connectionId] = s
     },
     async clear(connectionId: string) {

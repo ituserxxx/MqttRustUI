@@ -103,12 +103,22 @@ impl ConnectionManager {
     pub async fn disconnect(&self, id: &str) -> Result<(), String> {
         let rt = self.runtimes.lock().await.get(id).cloned();
         let rt = rt.ok_or_else(|| format!("连接 {id} 不存在"))?;
+        // 先发出 Disconnecting，UI 给出"断开中"的短暂反馈
+        self.set_state(&rt, ConnectionState::Disconnecting, None).await;
         rt.stop.store(true, Ordering::SeqCst);
         // 触发一次正常断开
         let _ = rt.client.lock().await.disconnect().await;
         self.set_state(&rt, ConnectionState::Idle, None).await;
         self.runtimes.lock().await.remove(id);
         Ok(())
+    }
+
+    /// 断开所有连接（托盘"全部断开"用）。
+    pub async fn disconnect_all(&self) {
+        let ids: Vec<String> = self.runtimes.lock().await.keys().cloned().collect();
+        for id in ids {
+            let _ = self.disconnect(&id).await;
+        }
     }
 
     pub async fn subscribe(&self, id: &str, filter: String, qos: Qos) -> Result<(), String> {
@@ -170,11 +180,11 @@ impl ConnectionManager {
     }
 
     pub async fn state(&self, id: &str) -> Option<ConnectionState> {
-        self.runtimes
-            .lock()
-            .await
-            .get(id)
-            .map(|rt| rt.state.lock().await.clone())
+        let rt = self.runtimes.lock().await.get(id).cloned();
+        match rt {
+            Some(rt) => Some(rt.state.lock().await.clone()),
+            None => None,
+        }
     }
 
     pub async fn update_settings(&self, s: AppSettings) {
@@ -182,42 +192,56 @@ impl ConnectionManager {
     }
 
     /// 批量 flush 主循环（全局单任务）。由上层运行时 spawn。
+    /// 附带 1s 一次的 Stats 推送（收发速率），保证前端"收/发速率"有数。
     pub async fn flush_loop(self: Arc<Self>) {
         let interval = self.settings.lock().await.flush_interval_ms;
         let mut ticker = tokio::time::interval(Duration::from_millis(interval.max(1)));
+        let mut stats_ticker = tokio::time::interval(Duration::from_secs(1));
+        // 立即触发一次，让首屏 stats 不为空
+        stats_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
-            ticker.tick().await;
-            let runtimes = self.runtimes.lock().await.clone();
-            let batch = self.settings.lock().await.flush_batch.max(1);
-            for rt in runtimes.values() {
-                let mut buf = rt.buffer.lock().await;
-                let usage = buf.usage();
-                // 背压降级：内存压力 > 95% 时只发统计、不发明细
-                if usage > 0.95 {
-                    if !rt.degraded.swap(true, Ordering::SeqCst) {
-                        rt.sink.emit(AppEvent::Backpressure {
+            tokio::select! {
+                _ = ticker.tick() => {
+                    let runtimes = self.runtimes.lock().await.clone();
+                    let batch = self.settings.lock().await.flush_batch.max(1);
+                    for rt in runtimes.values() {
+                        let mut buf = rt.buffer.lock().await;
+                        let usage = buf.usage();
+                        // 背压降级：内存压力 > 95% 时只发统计、不发明细
+                        if usage > 0.95 {
+                            if !rt.degraded.swap(true, Ordering::SeqCst) {
+                                rt.sink.emit(AppEvent::Backpressure {
+                                    connection_id: rt.conn.id.clone(),
+                                    degraded: true,
+                                });
+                            }
+                            continue;
+                        } else if rt.degraded.swap(false, Ordering::SeqCst) {
+                            rt.sink.emit(AppEvent::Backpressure {
+                                connection_id: rt.conn.id.clone(),
+                                degraded: false,
+                            });
+                        }
+                        let all: Vec<StoredMessage> = buf.drain_all();
+                        drop(buf);
+                        if all.is_empty() { continue; }
+                        for chunk in all.chunks(batch) {
+                            rt.sink.emit(AppEvent::MessageBatch {
+                                connection_id: rt.conn.id.clone(),
+                                messages: chunk.to_vec(),
+                            });
+                        }
+                    }
+                }
+                _ = stats_ticker.tick() => {
+                    let runtimes = self.runtimes.lock().await.clone();
+                    for rt in runtimes.values() {
+                        let stats = rt.stats.lock().await.snapshot();
+                        rt.sink.emit(AppEvent::Stats {
                             connection_id: rt.conn.id.clone(),
-                            degraded: true,
+                            stats,
                         });
                     }
-                    continue;
-                } else if rt.degraded.swap(false, Ordering::SeqCst) {
-                    rt.sink.emit(AppEvent::Backpressure {
-                        connection_id: rt.conn.id.clone(),
-                        degraded: false,
-                    });
-                }
-                // 取出全部并按 batch 切块推送（避免单条巨大对象）
-                let all: Vec<StoredMessage> = buf.drain_all();
-                drop(buf);
-                if all.is_empty() {
-                    continue;
-                }
-                for chunk in all.chunks(batch) {
-                    rt.sink.emit(AppEvent::MessageBatch {
-                        connection_id: rt.conn.id.clone(),
-                        messages: chunk.to_vec(),
-                    });
                 }
             }
         }

@@ -136,3 +136,25 @@ pub async fn save_settings(
     state.manager.update_settings(settings).await;
     Ok(())
 }
+
+/// 导出配置为 JSON 字符串（仅含 credential_ref 引用，无敏感明文）。
+#[tauri::command]
+pub async fn export_config(state: State<'_, AppState>) -> Result<String, String> {
+    let cfg = state.config.snapshot().await;
+    serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())
+}
+
+/// 从 JSON 字符串导入配置（校验并落盘）。
+#[tauri::command]
+pub async fn import_config(state: State<'_, AppState>, json: String) -> Result<(), String> {
+    let cfg: mqttkit_config::model::AppConfig =
+        serde_json::from_str(&json).map_err(|e| format!("配置 JSON 解析失败: {e}"))?;
+    state.config.save(cfg).await.map_err(|e| e.to_string())
+}
+
+/// 断开所有连接（托盘"全部断开"）。
+#[tauri::command]
+pub async fn disconnect_all(state: State<'_, AppState>) -> Result<(), String> {
+    state.manager.disconnect_all().await;
+    Ok(())
+}

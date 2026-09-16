@@ -14,9 +14,10 @@ default-run = "mqttrustui"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png", "menu"] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance = { workspace = true }
 tauri-plugin-dialog = { workspace = true }
+tauri-plugin-fs = { workspace = true }
 tauri-plugin-notification = { workspace = true }
 tauri-plugin-opener = { workspace = true }
 

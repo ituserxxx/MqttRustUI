@@ -39,6 +39,9 @@ export const api = {
   getSettings: () => invoke<AppSettings>('get_settings'),
   saveSettings: (settings: AppSettings) =>
     invoke<void>('save_settings', { settings }),
+  exportConfig: () => invoke<string>('export_config'),
+  importConfig: (json: string) => invoke<void>('import_config', { json }),
+  disconnectAll: () => invoke<void>('disconnect_all'),
 }
 
 export interface EventHandlers {

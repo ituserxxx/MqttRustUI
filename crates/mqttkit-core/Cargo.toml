@@ -16,3 +16,10 @@ uuid.workspace = true
 rumqttc.workspace = true
 rhai.workspace = true
 base64 = "0.22"
+# TLS 自签证书放行（verify_hostname=false）所需的自定义 ClientConfig 路径
+# rustls 0.23.43+ 已移除 dangerous_configuration feature——builder 直接提供
+# `.dangerous().with_custom_certificate_verifier(..)`，无需 feature gate
+rustls = "0.23"
+tokio-rustls = "0.26"
+rustls-pemfile = "2"
+http = "1"

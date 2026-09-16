@@ -71,9 +71,12 @@ const treeData = computed(() => {
   return Object.values(root.children).map((c) => toAnt(c, ''))
 })
 
+const emit = defineEmits<{ (e: 'select-topic', topic: string): void }>()
+
 function onSelect(keys: any[]) {
-  // 选中某 topic 时可在父级做过滤（此处仅占位，过滤逻辑在 MainView 的搜索框）
-  void keys
+  // 选中节点（key = 完整 topic 路径）时通知父级过滤消息列表
+  const k = keys?.[0]
+  if (typeof k === 'string' && k) emit('select-topic', k)
 }
 </script>
 
