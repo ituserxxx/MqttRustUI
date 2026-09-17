@@ -253,7 +253,8 @@ pub struct StoredMessage {
 }
 
 /// 收发流量统计。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+/// 注意：不含 `Eq`——`f64` 不实现 Eq（IEEE 754 有 NaN），速率字段是浮点。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub struct TrafficStats {
     pub received: u64,
     pub sent: u64,

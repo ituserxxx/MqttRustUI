@@ -1,14 +1,27 @@
 //! 收发流量统计（滑动 1s 窗口速率）。
 use mqttkit_ipc::model::TrafficStats;
+// 注意：必须显式限定 std::time::Instant——rhai 也导出一个 Instant 类型，
+// 同名遮蔽会让 #[derive(Default)] 解析到 rhai::Instant（无 Default impl）。
 use std::time::{Duration, Instant};
 
-#[derive(Default)]
 pub struct TrafficCounter {
     received: u64,
     sent: u64,
     window_start: Instant,
     recv_in_window: u64,
     send_in_window: u64,
+}
+
+impl Default for TrafficCounter {
+    fn default() -> Self {
+        TrafficCounter {
+            received: 0,
+            sent: 0,
+            window_start: Instant::now(),
+            recv_in_window: 0,
+            send_in_window: 0,
+        }
+    }
 }
 
 impl TrafficCounter {

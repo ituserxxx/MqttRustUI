@@ -1,6 +1,6 @@
 //! 原生菜单（三平台标准结构）。
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Manager, Wry};
+use tauri::{AppHandle, Emitter, Manager, Wry};
 
 /// 构建菜单。返回 `Menu<Wry>`。
 pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {

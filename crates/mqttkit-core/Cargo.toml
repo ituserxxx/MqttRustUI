@@ -23,3 +23,5 @@ rustls = "0.23"
 tokio-rustls = "0.26"
 rustls-pemfile = "2"
 http = "1"
+# v5 publish 的 payload 参数是 Into<Bytes>
+bytes = "1"

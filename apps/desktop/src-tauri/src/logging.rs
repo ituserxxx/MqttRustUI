@@ -9,6 +9,7 @@ use std::sync::Mutex;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::Context;
+use tracing_subscriber::prelude::*;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 use tracing_appender::non_blocking::WorkerGuard;
@@ -35,6 +36,12 @@ impl Visit for FieldCollector {
 struct Tee<W1, W2> {
     a: W1,
     b: W2,
+}
+
+impl<W1, W2> Tee<W1, W2> {
+    fn new(a: W1, b: W2) -> Self {
+        Tee { a, b }
+    }
 }
 
 impl<W1: Write, W2: Write> Write for Tee<W1, W2> {

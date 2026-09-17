@@ -4,7 +4,7 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::{AppHandle, Manager, Wry};
 
 /// 构建托盘图标（使用窗口默认图标作为托盘图）。
-pub fn build(app: &AppHandle, _menu: Menu) -> tauri::Result<()> {
+pub fn build(app: &AppHandle, _menu: Menu<Wry>) -> tauri::Result<()> {
     let icon = app
         .default_window_icon()
         .cloned()

@@ -7,7 +7,7 @@ use retry::RetryPolicy;
 
 use crate::buffer::MessageBuffer;
 use crate::codec;
-use crate::protocol::{self, from_rumq_qos};
+use crate::protocol::{self, ClientHandle, EventLoopHandle, PollOutcome};
 use crate::session::Session;
 use crate::stats::TrafficCounter;
 use mqttkit_config::model::AppConfig;
@@ -16,7 +16,6 @@ use mqttkit_ipc::event::AppEvent;
 use mqttkit_ipc::model::{
     AppSettings, Connection, ConnectionState, Qos, StoredMessage, Subscription,
 };
-use rumqttc::{AsyncClient, Event, EventLoop, Incoming, Publish};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -33,7 +32,7 @@ struct Runtime {
     conn: Connection,
     /// 订阅表（运行时可增删，与连接参数解耦，便于重连重放）
     subs: Mutex<Vec<Subscription>>,
-    client: Arc<Mutex<AsyncClient>>,
+    client: Arc<Mutex<ClientHandle>>,
     buffer: Arc<Mutex<MessageBuffer>>,
     state: Arc<Mutex<ConnectionState>>,
     stats: Arc<Mutex<TrafficCounter>>,
@@ -107,7 +106,7 @@ impl ConnectionManager {
         self.set_state(&rt, ConnectionState::Disconnecting, None).await;
         rt.stop.store(true, Ordering::SeqCst);
         // 触发一次正常断开
-        let _ = rt.client.lock().await.disconnect().await;
+        let _ = protocol::disconnect(&*rt.client.lock().await).await;
         self.set_state(&rt, ConnectionState::Idle, None).await;
         self.runtimes.lock().await.remove(id);
         Ok(())
@@ -124,7 +123,7 @@ impl ConnectionManager {
     pub async fn subscribe(&self, id: &str, filter: String, qos: Qos) -> Result<(), String> {
         let rt = self.runtimes.lock().await.get(id).cloned();
         let rt = rt.ok_or_else(|| format!("连接 {id} 不存在"))?;
-        protocol::subscribe(&rt.client.lock().await, &filter, qos)
+        protocol::subscribe(&*rt.client.lock().await, &filter, qos)
             .await
             .map_err(|e| e.to_string())?;
         rt.subs.lock().await.push(Subscription {
@@ -139,7 +138,7 @@ impl ConnectionManager {
     pub async fn unsubscribe(&self, id: &str, filter: &str) -> Result<(), String> {
         let rt = self.runtimes.lock().await.get(id).cloned();
         let rt = rt.ok_or_else(|| format!("连接 {id} 不存在"))?;
-        protocol::unsubscribe(&rt.client.lock().await, filter)
+        protocol::unsubscribe(&*rt.client.lock().await, filter)
             .await
             .map_err(|e| e.to_string())?;
         rt.subs.lock().await.retain(|s| s.filter != filter);
@@ -157,7 +156,7 @@ impl ConnectionManager {
         let rt = self.runtimes.lock().await.get(id).cloned();
         let rt = rt.ok_or_else(|| format!("连接 {id} 不存在"))?;
         let payload = codec::decode_base64(payload_base64).map_err(|e| e.to_string())?;
-        protocol::publish(&rt.client.lock().await, topic, qos, retain, payload)
+        protocol::publish(&*rt.client.lock().await, topic, qos, retain, payload)
             .await
             .map_err(|e| e.to_string())?;
         rt.stats.lock().await.mark_send(1);
@@ -262,7 +261,7 @@ async fn poll_loop(
     rt: Arc<Runtime>,
     vault: Arc<Vault>,
     retry: RetryPolicy,
-    mut eventloop: EventLoop,
+    mut eventloop: EventLoopHandle,
 ) {
     let conn = &rt.conn;
     // 初始 CONNECT 已发出；等待 Connected 或错误
@@ -271,10 +270,15 @@ async fn poll_loop(
             break;
         }
         match eventloop.poll().await {
-            Ok(Event::Incoming(Incoming::Publish(p))) => {
-                handle_publish(&rt, p).await;
+            Ok(PollOutcome::Publish {
+                topic,
+                payload,
+                qos,
+                retain,
+            }) => {
+                handle_publish(&rt, topic, payload, qos, retain).await;
             }
-            Ok(Event::Incoming(Incoming::Connected)) => {
+            Ok(PollOutcome::Connected) => {
                 // 重连成功后按会话策略决定是否重放订阅
                 let subs = rt.subs.lock().await.clone();
                 let session = Session::from_subs(&subs);
@@ -282,7 +286,7 @@ async fn poll_loop(
                     for sub in session.subscriptions() {
                         if sub.enabled {
                             let _ = protocol::subscribe(
-                                &rt.client.lock().await,
+                                &*rt.client.lock().await,
                                 &sub.filter,
                                 sub.qos,
                             )
@@ -292,13 +296,13 @@ async fn poll_loop(
                 }
                 set_state_remote(&rt, ConnectionState::Connected, None).await;
             }
-            Ok(_) => {}
+            Ok(PollOutcome::Other) => {}
             Err(e) => {
                 if rt.stop.load(Ordering::SeqCst) {
                     break;
                 }
                 tracing::warn!(target: "conn", "连接 {} 异常: {e}", conn.id);
-                set_state_remote(&rt, ConnectionState::Reconnecting, Some(e.to_string())).await;
+                set_state_remote(&rt, ConnectionState::Reconnecting, Some(e)).await;
                 // 指数退避重连
                 let mut attempt: u32 = 0;
                 let mut new_loop = None;
@@ -338,19 +342,18 @@ async fn poll_loop(
     }
 }
 
-async fn handle_publish(rt: &Runtime, p: Publish) {
-    let payload = p.payload.as_ref().to_vec();
+async fn handle_publish(rt: &Runtime, topic: String, payload: Vec<u8>, qos: Qos, retain: bool) {
     let size = payload.len();
     let preview = codec::preview(&payload, 1024);
     let msg = StoredMessage {
         id: uuid::Uuid::new_v4().to_string(),
         connection_id: rt.conn.id.clone(),
-        topic: p.topic,
+        topic,
         payload_base64: codec::encode_base64(&payload),
         preview,
         size,
-        qos: from_rumq_qos(p.qos),
-        retain: p.retain,
+        qos,
+        retain,
         timestamp: now_ms(),
     };
     rt.buffer.lock().await.push(msg);

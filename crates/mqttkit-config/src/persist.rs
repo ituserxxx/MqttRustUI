@@ -86,17 +86,18 @@ impl ConfigStore {
         Ok(())
     }
 
-    /// 开启一个 500ms 防抖刷盘任务：高频修改期间只更新内存，定时落盘一次。
-    pub fn spawn_debounced_flush(self: &Arc<Self>) {
-        let store = self.clone();
-        tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(Duration::from_millis(500));
-            loop {
-                ticker.tick().await;
-                if let Err(e) = store.flush().await {
-                    tracing::warn!(target: "config", "防抖落盘失败: {e}");
-                }
+    /// 防抖落盘循环：高频修改期间只更新内存，每 500ms 落盘一次。
+    ///
+    /// 返回 future，由调用方在 Tokio runtime 内 spawn（如 `tauri::async_runtime::spawn`）。
+    /// 不在本函数内 `tokio::spawn`，以免脱离 runtime 上下文导致 panic，
+    /// 也避免让 config crate 直接依赖 Tauri 的 runtime。
+    pub async fn debounced_flush_loop(self: Arc<Self>) {
+        let mut ticker = tokio::time::interval(Duration::from_millis(500));
+        loop {
+            ticker.tick().await;
+            if let Err(e) = self.flush().await {
+                tracing::warn!(target: "config", "防抖落盘失败: {e}");
             }
-        });
+        }
     }
 }

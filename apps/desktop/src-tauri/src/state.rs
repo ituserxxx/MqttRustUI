@@ -7,7 +7,7 @@ use mqttkit_config::persist::ConfigStore;
 use mqttkit_config::vault::Vault;
 use mqttkit_core::conn::{ConnectionManager, EventSink};
 use mqttkit_ipc::event::{AppEvent, EVT_BACKPRESSURE, EVT_BATCH, EVT_STATE, EVT_STATS};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 /// 托管在 Tauri 中的共享状态。
 pub struct AppState {

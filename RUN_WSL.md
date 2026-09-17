@@ -23,6 +23,10 @@ sudo apt install -y libwebkit2gtk-4.1-dev build-essential \
   curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev \
   librsvg2-dev pkg-config
 
+# 中文字体（**必须**：WSLg 下没有 CJK 字体，UI 和菜单的中文全部显示为方块乱码）
+sudo apt install -y fonts-noto-cjk fonts-noto-cjk-extra
+fc-cache -fv
+
 # Node（前端）。推荐 20 LTS
 sudo apt install -y nodejs npm
 # 或用 nvm： nvm install 20 && nvm use 20
@@ -119,5 +123,7 @@ cd ui && npm run dev        # vite 起 http://localhost:5173
 - 损坏配置备份：同目录 `config.json.bak`
 
 **headless WSL 注意**：WSL 默认无显示，`tauri dev` 的 GUI 窗口需要 WSLg（Windows 11 自带）或 X Server（VcXsrv）。纯逻辑排错用 `cargo check` + 日志即可，不必起 GUI。
+
+**中文乱码（方块 □□）**：WSL 缺 CJK 字体所致，`sudo apt install -y fonts-noto-cjk && fc-cache -fv` 后重启应用即可（见第 0 节）。
 
 > 日志脱敏、配置原子写、keyring 容错等都已实现，`cargo check` 通过即可进入功能联调。

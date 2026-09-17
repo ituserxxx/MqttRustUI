@@ -2345,6 +2345,7 @@ name = "mqttkit-core"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "bytes",
  "http",
  "mqttkit-config",
  "mqttkit-ipc",

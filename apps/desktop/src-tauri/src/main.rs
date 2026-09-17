@@ -45,7 +45,8 @@ fn main() {
                 tauri::async_runtime::block_on(ConfigStore::load_or_default(config_path))
                     .expect("加载配置失败"),
             );
-            store.spawn_debounced_flush();
+            // 防抖落盘循环：config crate 不依赖 Tauri，故在此用 Tauri 的 runtime spawn
+            tauri::async_runtime::spawn(store.clone().debounced_flush_loop());
 
             // 凭据保险库
             let vault = Arc::new(Vault::new());
